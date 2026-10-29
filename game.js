@@ -1,8 +1,25 @@
 // ============================================================
-//  Ping-Pong contra la máquina - Phaser 3
+//  Ping-Pong NEON contra la máquina - Phaser 3
 //  Escenas: Boot -> Menú -> Juego (+ Pausa)
 //  Controles: ↑/↓ o W/S mover | P o ESC pausar | ESPACIO reiniciar al terminar
 // ============================================================
+
+// ---------- Paleta neón ----------
+const NEON = {
+    bg:      0x07071a,
+    panel:   0x0d0d2b,
+    cyan:    0x00f0ff,
+    magenta: 0xff2bd6,
+    lime:    0x39ff14,
+    yellow:  0xfff200,
+    orange:  0xff6a00,
+    purple:  0xb026ff,
+    blue:    0x2f9bff,
+    red:     0xff2a2a
+};
+const BG_CSS = '#07071a';
+const BALL_COLOR = NEON.yellow;
+const toCss = (c) => '#' + c.toString(16).padStart(6, '0');
 
 // ---------- Constantes ----------
 const PLAYER_SPEED = 400;
@@ -11,7 +28,7 @@ const BALL_MAX_SPEED = 750;
 const SMASH_MIN_SPEED = 700;
 const SMASH_MAX_SPEED = 1000;
 const WIN_SCORE = 7;
-const POWER_DURATION = 8000;      // ms que dura "grande" / "reducir"
+const POWER_DURATION = 8000;      // ms que dura un efecto
 const POWER_SPAWN_EVERY = 7000;   // ms entre poderes
 const POWER_LIFETIME = 9000;      // ms que el poder queda en la cancha
 
@@ -23,21 +40,43 @@ const DIFFICULTIES = [
 
 // Tipos de poder
 const POWERS = {
-    big:   { label: 'G', color: 0x22c55e, text: '¡RAQUETA GRANDE!' },
-    smash: { label: 'S', color: 0xf97316, text: '¡SMASH! Próxima devolución veloz' },
-    small: { label: 'R', color: 0xa855f7, text: '¡RIVAL REDUCIDO!' }
+    big:   { label: 'G', color: NEON.lime,   text: '¡RAQUETA GRANDE!',  desc: 'Raqueta grande' },
+    smash: { label: 'S', color: NEON.orange, text: '¡SMASH! Devuelve veloz', desc: 'Smash: devuelves más rápido' },
+    small: { label: 'R', color: NEON.purple, text: '¡RIVAL REDUCIDO!',  desc: 'Reduce la raqueta rival' },
+    ball:  { label: 'B', color: NEON.blue,   text: '',                  desc: 'Pelota grande o mini (al azar)' }
 };
 
-// ---------- Utilidad: botón ----------
-function makeButton(scene, x, y, label, onClick, w = 280, h = 54, color = 0x16a34a) {
-    const bg = scene.add.rectangle(x, y, w, h, color)
-        .setStrokeStyle(3, 0xffffff)
+// ---------- Utilidades de estilo neón ----------
+// Resplandor en WebGL (si el navegador solo usa Canvas, simplemente se omite)
+function addGlow(obj, color, strength = 4) {
+    if (obj.preFX) obj.preFX.addGlow(color, strength, 0, false, 0.1, 16);
+    return obj;
+}
+
+function neonText(scene, x, y, str, size, color, extra = {}) {
+    return scene.add.text(x, y, str, Object.assign({
+        fontFamily: 'monospace',
+        fontSize: size + 'px',
+        fontStyle: 'bold',
+        color: toCss(color),
+        shadow: { offsetX: 0, offsetY: 0, color: toCss(color), blur: 12, stroke: true, fill: true }
+    }, extra));
+}
+
+// Borde de cancha con "halo" falso (funciona sin WebGL)
+function neonRect(scene, x, y, w, h, color) {
+    scene.add.rectangle(x, y, w, h).setStrokeStyle(14, color, 0.12);
+    scene.add.rectangle(x, y, w, h).setStrokeStyle(6, color, 0.25);
+    return scene.add.rectangle(x, y, w, h).setStrokeStyle(2, color, 1);
+}
+
+function makeButton(scene, x, y, label, onClick, w = 280, h = 54, color = NEON.cyan) {
+    const bg = scene.add.rectangle(x, y, w, h, NEON.panel)
+        .setStrokeStyle(3, color)
         .setInteractive({ useHandCursor: true });
-    const txt = scene.add.text(x, y, label, {
-        fontFamily: 'monospace', fontSize: '24px', color: '#ffffff', fontStyle: 'bold'
-    }).setOrigin(0.5);
-    bg.on('pointerover', () => bg.setAlpha(0.8));
-    bg.on('pointerout', () => bg.setAlpha(1));
+    const txt = neonText(scene, x, y, label, 22, color).setOrigin(0.5);
+    bg.on('pointerover', () => bg.setFillStyle(color, 0.3));
+    bg.on('pointerout', () => bg.setFillStyle(NEON.panel, 1));
     bg.on('pointerdown', onClick);
     return { bg, txt, setLabel: (t) => txt.setText(t) };
 }
@@ -52,11 +91,11 @@ class BootScene extends Phaser.Scene {
         const g = this.make.graphics({ x: 0, y: 0, add: false });
 
         g.fillStyle(0xffffff, 1);
-        g.fillRoundedRect(0, 0, 16, 100, 6);
+        g.fillRoundedRect(0, 0, 16, 100, 7);
         g.generateTexture('paddle', 16, 100);
 
         g.clear();
-        g.fillStyle(0xfacc15, 1);
+        g.fillStyle(0xffffff, 1);
         g.fillCircle(10, 10, 10);
         g.generateTexture('ball', 20, 20);
 
@@ -81,56 +120,43 @@ class MenuScene extends Phaser.Scene {
     constructor() { super('MenuScene'); }
 
     create() {
-        this.cameras.main.setBackgroundColor('#14532d');
-        this.add.rectangle(400, 300, 780, 580).setStrokeStyle(4, 0xffffff, 0.8);
+        this.cameras.main.setBackgroundColor(BG_CSS);
+        neonRect(this, 400, 300, 780, 580, NEON.cyan);
 
         // Pelota decorativa
-        const deco = this.add.image(130, 120, 'ball').setScale(1.4);
+        const deco = this.add.image(130, 110, 'ball').setScale(1.4).setTint(BALL_COLOR);
+        addGlow(deco, BALL_COLOR, 6);
         this.tweens.add({ targets: deco, x: 670, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-        this.tweens.add({ targets: deco, y: 90, duration: 350, yoyo: true, repeat: -1, ease: 'Quad.easeOut' });
+        this.tweens.add({ targets: deco, y: 80, duration: 350, yoyo: true, repeat: -1, ease: 'Quad.easeOut' });
 
-        this.add.text(400, 150, 'PING-PONG', {
-            fontFamily: 'monospace', fontSize: '72px', color: '#ffffff', fontStyle: 'bold'
-        }).setOrigin(0.5);
-        this.add.text(400, 210, 'contra la máquina', {
-            fontFamily: 'monospace', fontSize: '26px', color: '#facc15'
-        }).setOrigin(0.5);
+        neonText(this, 400, 150, 'PING-PONG', 72, NEON.cyan).setOrigin(0.5);
+        neonText(this, 400, 210, 'NEON  vs  MÁQUINA', 24, NEON.magenta).setOrigin(0.5);
 
-        // Botones
-        makeButton(this, 400, 290, 'JUGAR', () => this.startGame());
+        makeButton(this, 400, 275, 'JUGAR', () => this.startGame(), 280, 54, NEON.lime);
 
-        const diffBtn = makeButton(this, 400, 355, '', () => {
+        const diffBtn = makeButton(this, 400, 340, '', () => {
             const next = (this.registry.get('diff') + 1) % DIFFICULTIES.length;
             this.registry.set('diff', next);
             diffBtn.setLabel('Dificultad: ' + DIFFICULTIES[next].name);
-        }, 280, 54, 0x1d4ed8);
+        }, 340, 54, NEON.magenta);
         diffBtn.setLabel('Dificultad: ' + DIFFICULTIES[this.registry.get('diff')].name);
 
         // Leyenda de poderes
-        this.add.text(400, 425, 'PODERES (los gana quien golpeó la pelota por última vez)', {
-            fontFamily: 'monospace', fontSize: '15px', color: '#d1fae5'
-        }).setOrigin(0.5);
+        neonText(this, 400, 400, 'PODERES (los gana quien golpeó la pelota al final)', 15, NEON.cyan,
+            { fontStyle: 'normal' }).setOrigin(0.5);
 
-        const legend = [
-            { key: 'big',   desc: 'Raqueta grande' },
-            { key: 'smash', desc: 'Smash: devuelves más rápido' },
-            { key: 'small', desc: 'Reduce la raqueta rival' }
-        ];
-        legend.forEach((item, i) => {
-            const y = 458 + i * 30;
-            const p = POWERS[item.key];
-            this.add.circle(190, y, 12, p.color).setStrokeStyle(2, 0xffffff);
-            this.add.text(190, y, p.label, {
-                fontFamily: 'monospace', fontSize: '15px', color: '#ffffff', fontStyle: 'bold'
+        Object.values(POWERS).forEach((p, i) => {
+            const y = 432 + i * 30;
+            const c = this.add.circle(170, y, 12, p.color);
+            addGlow(c, p.color, 4);
+            this.add.text(170, y, p.label, {
+                fontFamily: 'monospace', fontSize: '15px', color: '#000000', fontStyle: 'bold'
             }).setOrigin(0.5);
-            this.add.text(215, y, item.desc, {
-                fontFamily: 'monospace', fontSize: '18px', color: '#ffffff'
-            }).setOrigin(0, 0.5);
+            neonText(this, 195, y, p.desc, 18, p.color, { fontStyle: 'normal' }).setOrigin(0, 0.5);
         });
 
-        this.add.text(400, 565, '↑ / ↓ o W / S para mover  |  P o ESC para pausar', {
-            fontFamily: 'monospace', fontSize: '14px', color: '#a7f3d0'
-        }).setOrigin(0.5);
+        neonText(this, 400, 568, '↑ / ↓ o W / S para mover  |  P o ESC para pausar', 14, NEON.cyan,
+            { fontStyle: 'normal' }).setOrigin(0.5);
 
         // Teclado
         this.input.keyboard.once('keydown-ENTER', () => this.startGame());
@@ -149,7 +175,7 @@ class GameScene extends Phaser.Scene {
     constructor() { super('GameScene'); }
 
     create() {
-        this.cameras.main.setBackgroundColor('#14532d');
+        this.cameras.main.setBackgroundColor(BG_CSS);
         this.cpuSpeed = DIFFICULTIES[this.registry.get('diff')].cpuSpeed;
 
         // Estado
@@ -161,26 +187,29 @@ class GameScene extends Phaser.Scene {
             player: { big: null, small: null, smash: false },
             cpu:    { big: null, small: null, smash: false }
         };
+        this.ballFx = { timer: null, label: '' };
 
         // Cancha
-        this.add.rectangle(400, 300, 780, 580).setStrokeStyle(4, 0xffffff, 0.8);
+        neonRect(this, 400, 300, 780, 580, NEON.cyan);
         for (let y = 20; y < 600; y += 40) {
-            this.add.rectangle(400, y, 4, 20, 0xffffff, 0.6);
+            this.add.rectangle(400, y, 4, 20, NEON.magenta, 0.55);
         }
 
         // Raquetas
-        this.player = this.physics.add.image(40, 300, 'paddle');
-        this.cpu = this.physics.add.image(760, 300, 'paddle');
+        this.player = this.physics.add.image(40, 300, 'paddle').setTint(NEON.cyan);
+        this.cpu = this.physics.add.image(760, 300, 'paddle').setTint(NEON.magenta);
         [this.player, this.cpu].forEach(p => {
             p.setImmovable(true);
             p.setCollideWorldBounds(true);
         });
-        this.cpu.setTint(0xf87171);
+        addGlow(this.player, NEON.cyan, 5);
+        addGlow(this.cpu, NEON.magenta, 5);
 
         // Pelota
-        this.ball = this.physics.add.image(400, 300, 'ball');
+        this.ball = this.physics.add.image(400, 300, 'ball').setTint(BALL_COLOR);
         this.ball.setBounce(1);
         this.ball.setCollideWorldBounds(true);
+        addGlow(this.ball, BALL_COLOR, 6);
         this.physics.world.setBoundsCollision(false, false, true, true);
 
         this.physics.add.collider(this.ball, this.player, this.hitPaddle, null, this);
@@ -206,28 +235,20 @@ class GameScene extends Phaser.Scene {
         this.keySpace = this.input.keyboard.addKey(K.SPACE);
 
         // HUD
-        this.scoreText = this.add.text(400, 30, '0  -  0', {
-            fontFamily: 'monospace', fontSize: '48px', color: '#ffffff'
-        }).setOrigin(0.5);
+        this.scoreText = neonText(this, 400, 32, '0  -  0', 46, NEON.cyan).setOrigin(0.5);
 
-        this.statusPlayer = this.add.text(25, 565, '', {
-            fontFamily: 'monospace', fontSize: '15px', color: '#fde68a'
-        }).setOrigin(0, 1);
-        this.statusCpu = this.add.text(775, 565, '', {
-            fontFamily: 'monospace', fontSize: '15px', color: '#fecaca'
-        }).setOrigin(1, 1);
-
-        this.messageText = this.add.text(400, 450, '', {
-            fontFamily: 'monospace', fontSize: '28px', color: '#facc15', align: 'center'
-        }).setOrigin(0.5).setDepth(10);
+        const small = { fontStyle: 'normal', shadow: { offsetX: 0, offsetY: 0, color: '#000000', blur: 0, stroke: false, fill: false } };
+        this.statusPlayer = neonText(this, 25, 565, '', 15, NEON.cyan, small).setOrigin(0, 1);
+        this.statusCpu = neonText(this, 775, 565, '', 15, NEON.magenta, Object.assign({ align: 'right' }, small)).setOrigin(1, 1);
+        this.statusBall = neonText(this, 400, 565, '', 15, NEON.blue, Object.assign({ align: 'center' }, small)).setOrigin(0.5, 1);
 
         // Botón de pausa (arriba a la derecha)
-        const pauseBg = this.add.rectangle(755, 32, 44, 44, 0x000000, 0.45)
-            .setStrokeStyle(2, 0xffffff)
+        const pauseBg = this.add.rectangle(755, 32, 44, 44, NEON.panel)
+            .setStrokeStyle(2, NEON.cyan)
             .setInteractive({ useHandCursor: true })
             .setDepth(20);
-        this.add.rectangle(747, 32, 6, 20, 0xffffff).setDepth(21);
-        this.add.rectangle(763, 32, 6, 20, 0xffffff).setDepth(21);
+        this.add.rectangle(747, 32, 6, 20, NEON.cyan).setDepth(21);
+        this.add.rectangle(763, 32, 6, 20, NEON.cyan).setDepth(21);
         pauseBg.on('pointerdown', () => this.pauseGame());
 
         this.serveBall(Math.random() < 0.5 ? 1 : -1);
@@ -294,13 +315,12 @@ class GameScene extends Phaser.Scene {
             speed = Phaser.Math.Clamp(speed * 1.6, SMASH_MIN_SPEED, SMASH_MAX_SPEED);
             this.fx[who].smash = false;
             this.cameras.main.shake(120, 0.008);
+            ball.setTint(BALL_COLOR);
         }
-        ball.clearTint();
 
         const dir = who === 'player' ? 1 : -1;
         ball.setVelocity(dir * speed * Math.cos(angle), speed * Math.sin(angle));
         this.lastHitter = who;
-        if (this.fx[who].smash) ball.setTint(0xff4444);
     }
 
     // ---------- Poderes ----------
@@ -313,9 +333,10 @@ class GameScene extends Phaser.Scene {
         const orb = this.powerGroup.create(x, y, 'orb');
         orb.body.setAllowGravity(false);
         orb.setTint(def.color);
+        addGlow(orb, def.color, 6);
         orb.powerType = type;
         orb.label = this.add.text(x, y, def.label, {
-            fontFamily: 'monospace', fontSize: '20px', color: '#ffffff', fontStyle: 'bold'
+            fontFamily: 'monospace', fontSize: '20px', color: '#000000', fontStyle: 'bold'
         }).setOrigin(0.5);
 
         // Efecto de latido y desaparición con el tiempo
@@ -337,16 +358,21 @@ class GameScene extends Phaser.Scene {
         const def = POWERS[type];
         const who = this.lastHitter;
         const rival = who === 'player' ? 'cpu' : 'player';
-
-        this.showPopup(orb.x, orb.y, def.text, def.color);
-        this.removeOrb(orb);
+        let msg = def.text;
 
         if (type === 'big') this.setTimedEffect(who, 'big');
         else if (type === 'small') this.setTimedEffect(rival, 'small');
         else if (type === 'smash') {
             this.fx[who].smash = true;
-            ball.setTint(0xff4444);
+            ball.setTint(NEON.red);
+        } else if (type === 'ball') {
+            const grow = Math.random() < 0.5;
+            this.setBallSize(grow ? 2 : 0.5);
+            msg = grow ? '¡PELOTA GRANDE!' : '¡PELOTA MINI!';
         }
+
+        this.showPopup(orb.x, orb.y, msg, def.color);
+        this.removeOrb(orb);
     }
 
     setTimedEffect(who, kind) {
@@ -368,11 +394,25 @@ class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: paddle, scaleY: scale, duration: 200 });
     }
 
+    // Poder de la pelota: cambia su tamaño un rato
+    setBallSize(scale) {
+        if (this.ballFx.timer) this.ballFx.timer.remove(false);
+        this.ballFx.label = scale > 1 ? 'PELOTA GRANDE' : 'PELOTA MINI';
+        this.tweens.killTweensOf(this.ball);
+        this.tweens.add({ targets: this.ball, scale: scale, duration: 200 });
+        this.ballFx.timer = this.time.delayedCall(POWER_DURATION, () => this.resetBallSize(false));
+    }
+
+    resetBallSize(instant) {
+        if (this.ballFx.timer) this.ballFx.timer.remove(false);
+        this.ballFx.timer = null;
+        this.tweens.killTweensOf(this.ball);
+        if (instant) this.ball.setScale(1);
+        else this.tweens.add({ targets: this.ball, scale: 1, duration: 200 });
+    }
+
     showPopup(x, y, msg, color) {
-        const t = this.add.text(x, y, msg, {
-            fontFamily: 'monospace', fontSize: '22px', color: '#ffffff', fontStyle: 'bold',
-            stroke: '#000000', strokeThickness: 4
-        }).setOrigin(0.5).setDepth(15);
+        const t = neonText(this, x, y, msg, 22, color).setOrigin(0.5).setDepth(15);
         this.tweens.add({
             targets: t, y: y - 60, alpha: 0, duration: 1400,
             onComplete: () => t.destroy()
@@ -389,6 +429,9 @@ class GameScene extends Phaser.Scene {
         };
         this.statusPlayer.setText(fmt(this.fx.player));
         this.statusCpu.setText(fmt(this.fx.cpu));
+        this.statusBall.setText(this.ballFx.timer
+            ? this.ballFx.label + ' ' + Math.ceil(this.ballFx.timer.getRemainingSeconds()) + 's'
+            : '');
     }
 
     // ---------- Puntos y fin de partida ----------
@@ -397,7 +440,8 @@ class GameScene extends Phaser.Scene {
         else this.scoreCpu++;
         this.scoreText.setText(this.scorePlayer + '  -  ' + this.scoreCpu);
         this.cameras.main.shake(150, 0.01);
-        this.ball.clearTint();
+        this.ball.setTint(BALL_COLOR);
+        this.resetBallSize(true);
         this.fx.player.smash = false;
         this.fx.cpu.smash = false;
 
@@ -414,18 +458,17 @@ class GameScene extends Phaser.Scene {
         this.ball.setPosition(400, 300);
         const win = this.scorePlayer > this.scoreCpu;
 
-        this.add.rectangle(400, 300, 800, 600, 0x000000, 0.55).setDepth(30);
-        this.add.text(400, 190, win ? '¡GANASTE!' : 'PERDISTE', {
-            fontFamily: 'monospace', fontSize: '64px', fontStyle: 'bold',
-            color: win ? '#4ade80' : '#f87171'
-        }).setOrigin(0.5).setDepth(31);
-        this.add.text(400, 250, this.scorePlayer + '  -  ' + this.scoreCpu, {
-            fontFamily: 'monospace', fontSize: '36px', color: '#ffffff'
-        }).setOrigin(0.5).setDepth(31);
+        const items = [];
+        items.push(this.add.rectangle(400, 300, 800, 600, 0x000000, 0.7));
+        items.push(neonText(this, 400, 190, win ? '¡GANASTE!' : 'PERDISTE', 64,
+            win ? NEON.lime : NEON.red).setOrigin(0.5));
+        items.push(neonText(this, 400, 250, this.scorePlayer + '  -  ' + this.scoreCpu, 36,
+            NEON.cyan).setOrigin(0.5));
 
-        const b1 = makeButton(this, 400, 330, 'JUGAR DE NUEVO', () => this.scene.restart());
-        const b2 = makeButton(this, 400, 400, 'MENÚ PRINCIPAL', () => this.scene.start('MenuScene'), 280, 54, 0x1d4ed8);
-        [b1.bg, b1.txt, b2.bg, b2.txt].forEach(o => o.setDepth(31));
+        const b1 = makeButton(this, 400, 330, 'JUGAR DE NUEVO', () => this.scene.restart(), 300, 54, NEON.lime);
+        const b2 = makeButton(this, 400, 400, 'MENÚ PRINCIPAL', () => this.scene.start('MenuScene'), 300, 54, NEON.magenta);
+        items.push(b1.bg, b1.txt, b2.bg, b2.txt);
+        items.forEach(o => o.setDepth(31));
     }
 
     // ---------- Pausa ----------
@@ -442,26 +485,22 @@ class PauseScene extends Phaser.Scene {
     constructor() { super('PauseScene'); }
 
     create() {
-        this.add.rectangle(400, 300, 800, 600, 0x000000, 0.65);
-        this.add.text(400, 150, 'PAUSA', {
-            fontFamily: 'monospace', fontSize: '72px', color: '#ffffff', fontStyle: 'bold'
-        }).setOrigin(0.5);
+        this.add.rectangle(400, 300, 800, 600, 0x000000, 0.72);
+        neonText(this, 400, 150, 'PAUSA', 72, NEON.cyan).setOrigin(0.5);
 
-        makeButton(this, 400, 260, 'CONTINUAR', () => this.resumeGame());
+        makeButton(this, 400, 260, 'CONTINUAR', () => this.resumeGame(), 300, 54, NEON.lime);
         makeButton(this, 400, 330, 'REINICIAR', () => {
             this.scene.stop('GameScene');
             this.scene.start('GameScene');
             this.scene.stop();
-        }, 280, 54, 0xb45309);
+        }, 300, 54, NEON.orange);
         makeButton(this, 400, 400, 'MENÚ PRINCIPAL', () => {
             this.scene.stop('GameScene');
             this.scene.start('MenuScene');
             this.scene.stop();
-        }, 280, 54, 0x1d4ed8);
+        }, 300, 54, NEON.magenta);
 
-        this.add.text(400, 470, 'P o ESC para continuar', {
-            fontFamily: 'monospace', fontSize: '18px', color: '#a7f3d0'
-        }).setOrigin(0.5);
+        neonText(this, 400, 470, 'P o ESC para continuar', 18, NEON.cyan, { fontStyle: 'normal' }).setOrigin(0.5);
 
         const K = Phaser.Input.Keyboard.KeyCodes;
         this.keyP = this.input.keyboard.addKey(K.P);
@@ -487,7 +526,7 @@ const config = {
     type: Phaser.AUTO,
     width: 800,
     height: 600,
-    backgroundColor: '#14532d',
+    backgroundColor: BG_CSS,
     physics: { default: 'arcade', arcade: { debug: false } },
     scene: [BootScene, MenuScene, GameScene, PauseScene]
 };
